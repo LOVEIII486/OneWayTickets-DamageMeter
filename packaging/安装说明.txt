@@ -1,0 +1,94 @@
+再再启程 One Way Tickets 伤害统计模组整合包
+OWT Damage Meter 0.5.2 + BepInEx 5.4.23.5
+
+适用版本
+Windows 64 位，Steam 版《再再启程 One Way Tickets》。
+
+包内包含
+- BepInEx 5.4.23.5（x64）
+- BepInEx/plugins/OWT.DamageMeter.dll
+- 本安装说明
+- 第三方许可证
+
+OWT Damage Meter 的配置文件会在首次启动时自动生成：
+BepInEx/config/owt.damagemeter.cfg
+
+模组功能
+进入旅途后显示当前装备的每件装置：
+- 累计伤害
+- 平均 DPS
+- 伤害占比
+- 衍生伤害
+名称和图标底色按装置品阶着色。按 F10 或点面板上的“收起”可以隐藏面板，留下一个显示 DPS 的悬浮球；点击悬浮球恢复面板。
+闪电、爆炸与飞镖等衍生伤害会尽量归回触发它的武器。
+
+安装
+1. 退出游戏，Steam 可以保持运行。
+2. 解压压缩包，把里面的所有文件放到游戏根目录，也就是 再再启程.exe 所在的文件夹。
+   Steam 默认路径示例：
+   你的 Steam 库\steamapps\common\再再启程 One Way Tickets
+3. 系统询问是否合并或覆盖时，选择“是”。
+4. 从 Steam 正常启动游戏。
+
+整合包已经包含 BepInEx 和插件，不需要另外下载 DLL。
+
+同时安装两个模组
+1. 先按上面的步骤安装 Damage Meter。
+2. 下载 OWT Auto Repair 的整合包，解压到游戏根目录，提示合并时选择“是”。
+3. 两个插件都会位于 BepInEx\plugins，配置文件分别生成。
+4. 从 Steam 启动游戏。
+
+如果先装了 Auto Repair，也可以单独安装 Damage Meter，把 OWT.DamageMeter.dll 放进 BepInEx\plugins。
+两个整合包使用同一版 BepInEx，先后解压到同一目录即可。
+
+手动安装 BepInEx
+如果下载的是单独的 OWT.DamageMeter.dll，需要先安装 BepInEx 5.4.23.5 x64：
+- 用户文档：https://docs.bepinex.dev/articles/user_guide/installation/index.html
+- 发布页：https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5
+- 直接下载：https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip
+把以下内容放到游戏根目录：
+- winhttp.dll
+- doorstop_config.ini
+- .doorstop_version
+- changelog.txt
+- BepInEx 文件夹
+然后把 OWT.DamageMeter.dll 放进 BepInEx\plugins。
+
+日志验证
+打开游戏目录下的 BepInEx\LogOutput.log，能看到下面几行就说明插件加载成功：
+[Info   :OWT Damage Meter] OWT Damage Meter v0.5.2 loaded.
+[Info   :OWT Damage Meter] Damage meter host created.
+[Info   :OWT Damage Meter] Damage meter HUD built.
+
+配置
+配置文件：BepInEx\config\owt.damagemeter.cfg
+首次启动时自动生成。常用项：
+- ToggleKey：显示 / 隐藏快捷键，默认 F10。
+- PanelX、PanelY：面板位置。
+- PanelScale、PanelWidthScale：面板高度和宽度缩放。
+- ShowOtherSources：是否显示“其他来源”行。
+修改配置后重启游戏生效。
+
+卸载
+删除 BepInEx\plugins\OWT.DamageMeter.dll。
+如果不再使用任何模组，再删除游戏根目录的以下内容：
+- winhttp.dll
+- doorstop_config.ini
+- .doorstop_version
+- changelog.txt
+- BepInEx 文件夹
+
+常见问题
+- 杀毒软件报警
+  winhttp.dll 是 BepInEx 的注入组件，可能是误报。不放心的话不要安装。
+- 游戏更新后模组失效
+  游戏更新可能改变 Harmony 补丁目标，需要重新适配。
+- 想恢复原版
+  按卸载步骤删除文件，然后在 Steam 里校验游戏文件。
+- 面板没有出现
+  确认游戏处于旅途场景，并按 F10。安全区、游戏菜单和结算面板默认会隐藏面板。
+
+说明
+本包只包含加载器和伤害统计模组，不包含游戏本体或游戏代码。
+BepInEx 及其附带的组件均使用 MIT 许可证，许可证文本在 LICENSES 文件夹。
+本项目与游戏开发商无关。
