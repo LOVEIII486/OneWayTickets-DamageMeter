@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="0.5.2"
+VERSION="0.6.0"
 BEPINEX_VERSION="5.4.23.5"
 PKG_NAME="OneWayTickets_DamageMeter_v${VERSION}_BepInEx${BEPINEX_VERSION}_win64"
 

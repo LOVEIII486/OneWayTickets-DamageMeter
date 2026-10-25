@@ -15,7 +15,18 @@ namespace OWT.DamageMeter.Tracking
         private sealed class Tag
         {
             public Device Device;
+            public Device Support;
+            public DamageKind Kind;
             public bool Derived;
+        }
+
+        public struct HitSource
+        {
+            public Device Device;
+            public Device Support;
+            public DamageKind Kind;
+            public bool Derived;
+            public bool EnemySource;
         }
 
         private static readonly ConditionalWeakTable<Projectile, Tag> ProjectileTags =
@@ -24,7 +35,8 @@ namespace OWT.DamageMeter.Tracking
         private static readonly ConditionalWeakTable<Thunder_Helper.Thunder, Tag> ThunderTags =
             new ConditionalWeakTable<Thunder_Helper.Thunder, Tag>();
 
-        public static void TagProjectile(Projectile projectile, Device device, bool derived)
+        public static void TagProjectile(Projectile projectile, Device device, bool derived,
+            DamageKind kind, Device support = null)
         {
             if (projectile == null)
             {
@@ -32,22 +44,33 @@ namespace OWT.DamageMeter.Tracking
             }
 
             ProjectileTags.Remove(projectile);
-            if (device != null)
+            if (device != null || support != null)
             {
-                ProjectileTags.Add(projectile, new Tag { Device = device, Derived = derived });
+                ProjectileTags.Add(projectile, new Tag
+                {
+                    Device = device,
+                    Support = support,
+                    Kind = kind,
+                    Derived = derived,
+                });
             }
         }
 
-        public static bool TryGetProjectileTag(Projectile projectile, out Device device, out bool derived)
+        public static bool TryGetProjectileTag(Projectile projectile, out Device device,
+            out bool derived, out DamageKind kind, out Device support)
         {
             device = null;
             derived = false;
+            kind = DamageKind.Direct;
+            support = null;
             Tag tag;
             if (projectile != null && ProjectileTags.TryGetValue(projectile, out tag) && tag != null)
             {
                 device = tag.Device;
                 derived = tag.Derived;
-                return device != null;
+                kind = tag.Kind;
+                support = tag.Support;
+                return device != null || support != null;
             }
             return false;
         }
@@ -79,10 +102,13 @@ namespace OWT.DamageMeter.Tracking
             return false;
         }
 
-        public static Device Resolve(ITarget source, out bool viaTag, out bool tagDerived)
+        public static Device Resolve(ITarget source, out bool viaTag, out bool tagDerived,
+            out Device support, out DamageKind kind)
         {
             viaTag = false;
             tagDerived = false;
+            support = null;
+            kind = DamageKind.Direct;
 
             ITarget cursor = source;
             for (int depth = 0; cursor != null && depth < 8; depth++)
@@ -92,10 +118,15 @@ namespace OWT.DamageMeter.Tracking
                 {
                     Device tagged;
                     bool derived;
-                    if (TryGetProjectileTag(projectile, out tagged, out derived))
+                    DamageKind taggedKind;
+                    Device taggedSupport;
+                    if (TryGetProjectileTag(projectile, out tagged, out derived,
+                        out taggedKind, out taggedSupport))
                     {
                         viaTag = true;
                         tagDerived = derived;
+                        kind = taggedKind;
+                        support = taggedSupport;
                         return tagged;
                     }
                     cursor = projectile.emitter;
@@ -126,43 +157,60 @@ namespace OWT.DamageMeter.Tracking
         /// ambient proc context is used. enemySource means the hit came from the opposite
         /// faction and should not be counted as player output.
         /// </summary>
-        public static Device ResolveForHit(ITarget harmSource, out bool derived, out bool enemySource)
+        public static HitSource ResolveForHit(ITarget harmSource)
         {
-            derived = false;
-            enemySource = false;
+            HitSource hit = new HitSource { Kind = DamageKind.Direct };
 
             if (harmSource != null)
             {
                 if (IsOppositeFaction(harmSource))
                 {
-                    enemySource = true;
-                    return null;
+                    hit.EnemySource = true;
+                    return hit;
                 }
 
                 bool viaTag;
                 bool tagDerived;
-                Device direct = Resolve(harmSource, out viaTag, out tagDerived);
+                Device tagSupport;
+                DamageKind tagKind;
+                Device direct = Resolve(harmSource, out viaTag, out tagDerived,
+                    out tagSupport, out tagKind);
                 if (direct != null)
                 {
-                    derived = (viaTag && tagDerived)
-                        || (DamageOrigin.HasScope
-                            && DamageOrigin.CurrentDerived
-                            && ReferenceEquals(DamageOrigin.Current, direct));
-                    return direct;
+                    hit.Device = direct;
+                    hit.Support = tagSupport;
+                    hit.Kind = tagKind;
+
+                    bool ambientMatch = DamageOrigin.HasScope
+                        && DamageOrigin.CurrentDerived
+                        && ReferenceEquals(DamageOrigin.Current, direct);
+                    if (ambientMatch)
+                    {
+                        hit.Derived = true;
+                        hit.Kind = DamageOrigin.CurrentKind;
+                        hit.Support = DamageOrigin.CurrentSupport;
+                    }
+                    else
+                    {
+                        hit.Derived = viaTag && tagDerived;
+                        if (hit.Derived && hit.Kind == DamageKind.Direct)
+                        {
+                            hit.Kind = DamageKind.OtherDerived;
+                        }
+                    }
+                    return hit;
                 }
             }
 
             if (DamageOrigin.HasScope)
             {
-                Device ambient = DamageOrigin.Current;
-                if (ambient != null)
-                {
-                    derived = true;
-                    return ambient;
-                }
+                hit.Device = DamageOrigin.Current;
+                hit.Support = DamageOrigin.CurrentSupport;
+                hit.Kind = DamageOrigin.CurrentKind;
+                hit.Derived = true;
             }
 
-            return null;
+            return hit;
         }
 
         public static Device DeviceFromTransform(Transform transform)

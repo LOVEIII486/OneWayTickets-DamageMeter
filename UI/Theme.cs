@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using OWT.DamageMeter.Tracking;
 using UnityEngine;
 
 namespace OWT.DamageMeter.UI
@@ -155,6 +156,82 @@ namespace OWT.DamageMeter.UI
             get { return Chinese ? "衍" : "P"; }
         }
 
+        public static string Support
+        {
+            get { return Chinese ? "辅助" : "ASSIST"; }
+        }
+
+        public static string DirectDamage
+        {
+            get { return Chinese ? "直接伤害" : "Direct damage"; }
+        }
+
+        public static string DerivedDamage
+        {
+            get { return Chinese ? "衍生伤害" : "Derived damage"; }
+        }
+
+        public static string AssistDamage
+        {
+            get { return Chinese ? "协助伤害" : "Assist damage"; }
+        }
+
+        public static string AffectedDevices
+        {
+            get { return Chinese ? "影响装置" : "Affected devices"; }
+        }
+
+        public static string NoDerived
+        {
+            get { return Chinese ? "无衍生伤害" : "No derived damage"; }
+        }
+
+        public static string EffectPrefix
+        {
+            get { return Chinese ? "效果： " : "Effect: "; }
+        }
+
+        public static string SupportNote
+        {
+            get { return Chinese ? "已计入受影响装置，不重复统计" : "Included in affected device, not double counted"; }
+        }
+
+        public static string EffectName(DamageKind kind)
+        {
+            if (Chinese)
+            {
+                switch (kind)
+                {
+                    case DamageKind.Explosion: return "爆炸";
+                    case DamageKind.Lightning: return "闪电";
+                    case DamageKind.Dart: return "飞镖";
+                    case DamageKind.Ignite: return "点燃";
+                    case DamageKind.Assassinate: return "处决";
+                    case DamageKind.MuzzleBlast: return "枪口爆风";
+                    case DamageKind.ArrowChasing: return "追击箭";
+                    case DamageKind.Blast: return "冲击波";
+                    case DamageKind.Hail: return "冰雹";
+                    case DamageKind.OtherDerived: return "其他衍生";
+                    default: return "直接";
+                }
+            }
+
+            switch (kind)
+            {
+                case DamageKind.Explosion: return "Explosion";
+                case DamageKind.Lightning: return "Lightning";
+                case DamageKind.Dart: return "Dart";
+                case DamageKind.Ignite: return "Ignite";
+                case DamageKind.Assassinate: return "Assassinate";
+                case DamageKind.MuzzleBlast: return "Muzzle blast";
+                case DamageKind.ArrowChasing: return "Chasing arrow";
+                case DamageKind.Blast: return "Blast";
+                case DamageKind.Hail: return "Hail";
+                case DamageKind.OtherDerived: return "Other derived";
+                default: return "Direct";
+            }
+        }
+
         public static string Slot(string key)
         {
             if (Chinese)
@@ -196,9 +273,9 @@ namespace OWT.DamageMeter.UI
         {
             if (Chinese)
             {
-                return keyName + " 显示/隐藏  ·  拖动面板移动  ·  右下角缩放";
+                return keyName + " 显示/隐藏  ·  拖动面板移动  ·  点击行看明细  ·  右下角缩放";
             }
-            return keyName + " toggle  ·  drag panel  ·  resize corner";
+            return keyName + " toggle  ·  drag panel  ·  click row for details  ·  resize corner";
         }
 
         public static string BallLabel

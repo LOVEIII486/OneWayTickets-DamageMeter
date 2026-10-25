@@ -6,7 +6,7 @@
     <NoWarn>$(NoWarn);MSB3277;CS1701;CS1702</NoWarn>
     <AssemblyName>OWT.DamageMeter</AssemblyName>
     <RootNamespace>OWT.DamageMeter</RootNamespace>
-    <Version>0.5.2</Version>
+    <Version>0.6.0</Version>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
   </PropertyGroup>

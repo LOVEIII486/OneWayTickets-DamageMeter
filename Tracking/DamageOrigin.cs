@@ -13,6 +13,8 @@ namespace OWT.DamageMeter.Tracking
         private struct Scope
         {
             public Device Device;
+            public Device Support;
+            public DamageKind Kind;
             public bool Derived;
         }
 
@@ -28,6 +30,19 @@ namespace OWT.DamageMeter.Tracking
             get { return Stack.Count > 0 ? Stack[Stack.Count - 1].Device : null; }
         }
 
+        public static Device CurrentSupport
+        {
+            get { return Stack.Count > 0 ? Stack[Stack.Count - 1].Support : null; }
+        }
+
+        public static DamageKind CurrentKind
+        {
+            get
+            {
+                return Stack.Count > 0 ? Stack[Stack.Count - 1].Kind : DamageKind.Direct;
+            }
+        }
+
         public static bool CurrentDerived
         {
             get { return Stack.Count > 0 && Stack[Stack.Count - 1].Derived; }
@@ -35,13 +50,24 @@ namespace OWT.DamageMeter.Tracking
 
         public static void Push(Device device, bool derived)
         {
+            Push(device, derived, derived ? DamageKind.OtherDerived : DamageKind.Direct, null);
+        }
+
+        public static void Push(Device device, bool derived, DamageKind kind, Device support)
+        {
             // Harmony postfixes always run in practice, but a skipped/aborted patch chain
             // should not be able to grow the stack without bound.
             if (Stack.Count > 64)
             {
                 Stack.Clear();
             }
-            Stack.Add(new Scope { Device = device, Derived = derived });
+            Stack.Add(new Scope
+            {
+                Device = device,
+                Support = support,
+                Kind = kind,
+                Derived = derived,
+            });
         }
 
         public static void Pop()

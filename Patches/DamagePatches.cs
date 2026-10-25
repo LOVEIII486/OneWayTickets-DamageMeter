@@ -73,24 +73,24 @@ namespace OWT.DamageMeter.Patches
             // the source before dealing the derived damage.
             Patch(harmony, log, "Relic_Thunder_Modify_Variable.thunder_melee",
                 AccessTools.Method(typeof(Relic_Thunder_Modify_Variable), "thunder_melee"),
-                Method(nameof(RelicMeleeScopePrefix)), Method(nameof(PopPostfix)));
+                Method(nameof(ThunderMeleeScopePrefix)), Method(nameof(PopPostfix)));
 
             Patch(harmony, log, "Relic_Blast_Modify_Variable.blast_hit(source,target)",
                 AccessTools.Method(typeof(Relic_Blast_Modify_Variable), "blast_hit",
                     new[] { typeof(ITarget), typeof(ITarget) }),
-                Method(nameof(RelicMeleeScopePrefix)), Method(nameof(PopPostfix)));
+                Method(nameof(BlastScopePrefix)), Method(nameof(PopPostfix)));
 
             Patch(harmony, log, "Relic_Dart_Modify_Variable.dart_melee",
                 AccessTools.Method(typeof(Relic_Dart_Modify_Variable), "dart_melee"),
-                Method(nameof(RelicMeleeScopePrefix)), Method(nameof(PopPostfix)));
+                Method(nameof(DartScopePrefix)), Method(nameof(PopPostfix)));
 
             Patch(harmony, log, "Relic_Melee_Ignite.melee_ignite_event",
                 AccessTools.Method(typeof(Relic_Melee_Ignite), "melee_ignite_event"),
-                Method(nameof(RelicMeleeScopePrefix)), Method(nameof(PopPostfix)));
+                Method(nameof(IgniteScopePrefix)), Method(nameof(PopPostfix)));
 
             Patch(harmony, log, "Relic_Melee_Arrow_Chasing.melee_arrow_chasing_event",
                 AccessTools.Method(typeof(Relic_Melee_Arrow_Chasing), "melee_arrow_chasing_event"),
-                Method(nameof(RelicMeleeScopePrefix)), Method(nameof(PopPostfix)));
+                Method(nameof(ArrowChasingScopePrefix)), Method(nameof(PopPostfix)));
 
             Patch(harmony, log, "Relic_Melee_Assassinate.melee_assassinate_event",
                 AccessTools.Method(typeof(Relic_Melee_Assassinate), "melee_assassinate_event"),
@@ -99,6 +99,13 @@ namespace OWT.DamageMeter.Patches
             Patch(harmony, log, "Relic_Muzzle_Blast.knock_off",
                 AccessTools.Method(typeof(Relic_Muzzle_Blast), "knock_off"),
                 Method(nameof(MuzzleBlastScopePrefix)), Method(nameof(PopPostfix)));
+
+            // Hailstones are spawned by a ProjectileMgr tick event, outside the
+            // original projectile's damage scope. Push the original projectile's
+            // owner while the relic creates them so their hits remain attributed.
+            Patch(harmony, log, "Relic_Ammo_Hail.add_event",
+                AccessTools.Method(typeof(Relic_Ammo_Hail), "add_event"),
+                Method(nameof(HailScopePrefix)), Method(nameof(PopPostfix)));
 
             log.LogInfo(string.Format("Damage attribution hooks: {0}/{1} applied.", _applied, _attempted));
         }
@@ -233,14 +240,33 @@ namespace OWT.DamageMeter.Patches
 
                 Device origin = DamageOrigin.HasScope ? DamageOrigin.Current : null;
                 bool derived = DamageOrigin.HasScope && DamageOrigin.CurrentDerived;
-                if (__instance.faction == WorldEnum.Faction.player && origin != null)
+                DamageKind kind = DamageOrigin.HasScope ? DamageOrigin.CurrentKind : DamageKind.Direct;
+                Device support = DamageOrigin.HasScope ? DamageOrigin.CurrentSupport : null;
+
+                if (origin == null && __instance.emitter != null)
                 {
-                    SourceResolver.TagProjectile(__instance, origin, derived);
+                    bool viaTag;
+                    bool tagDerived;
+                    Device tagSupport;
+                    DamageKind tagKind;
+                    origin = SourceResolver.Resolve(__instance.emitter, out viaTag,
+                        out tagDerived, out tagSupport, out tagKind);
+                }
+
+                Device quiver = SupportResolver.ResolveProjectileSupport(__instance);
+                if (quiver != null)
+                {
+                    support = quiver;
+                }
+
+                if (__instance.faction == WorldEnum.Faction.player && (origin != null || support != null))
+                {
+                    SourceResolver.TagProjectile(__instance, origin, derived, kind, support);
                 }
                 else
                 {
                     // Pooled projectiles may still carry a previous tag.
-                    SourceResolver.TagProjectile(__instance, null, false);
+                    SourceResolver.TagProjectile(__instance, null, false, DamageKind.Direct, null);
                 }
             }
             catch
@@ -254,49 +280,55 @@ namespace OWT.DamageMeter.Patches
             {
                 if (__instance == null || __instance.faction != WorldEnum.Faction.player)
                 {
-                    DamageOrigin.Push(null, true);
+                    DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
                     return;
                 }
 
                 bool viaTag;
                 bool tagDerived;
-                Device origin = SourceResolver.Resolve(__instance, out viaTag, out tagDerived);
-                DamageOrigin.Push(origin, viaTag && tagDerived);
+                Device support;
+                DamageKind kind;
+                Device origin = SourceResolver.Resolve(__instance, out viaTag,
+                    out tagDerived, out support, out kind);
+                DamageOrigin.Push(origin, viaTag && tagDerived, kind, null);
             }
             catch
             {
-                DamageOrigin.Push(null, true);
+                DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
             }
         }
 
         private static void ProjectileExplodePrefix(Projectile __instance)
         {
-            PushProjectileScope(__instance);
+            PushProjectileScope(__instance, DamageKind.Explosion);
         }
 
         private static void DartExplodePrefix(DartProjectile __instance)
         {
-            PushProjectileScope(__instance);
+            PushProjectileScope(__instance, DamageKind.Dart);
         }
 
-        private static void PushProjectileScope(Projectile projectile)
+        private static void PushProjectileScope(Projectile projectile, DamageKind kind)
         {
             try
             {
                 if (projectile == null || projectile.faction != WorldEnum.Faction.player)
                 {
-                    DamageOrigin.Push(null, true);
+                    DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
                     return;
                 }
 
                 bool viaTag;
                 bool tagDerived;
-                Device origin = SourceResolver.Resolve(projectile, out viaTag, out tagDerived);
-                DamageOrigin.Push(origin, viaTag && tagDerived);
+                Device support;
+                DamageKind tagKind;
+                Device origin = SourceResolver.Resolve(projectile, out viaTag,
+                    out tagDerived, out support, out tagKind);
+                DamageOrigin.Push(origin, true, kind, support);
             }
             catch
             {
-                DamageOrigin.Push(null, true);
+                DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
             }
         }
 
@@ -328,24 +360,44 @@ namespace OWT.DamageMeter.Patches
                 {
                     origin = null;
                 }
-                DamageOrigin.Push(origin, true);
+                DamageOrigin.Push(origin, true, DamageKind.Lightning, null);
             }
             catch
             {
-                DamageOrigin.Push(null, true);
+                DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
             }
         }
 
         // ---------------------------------------------------------------- relic proc scopes
 
-        private static void RelicMeleeScopePrefix(object[] __args)
+        private static void ThunderMeleeScopePrefix(object[] __args)
         {
-            PushSourceScope(__args, 0);
+            PushSourceScope(__args, 0, DamageKind.Lightning);
+        }
+
+        private static void BlastScopePrefix(object[] __args)
+        {
+            PushSourceScope(__args, 0, DamageKind.Blast);
+        }
+
+        private static void DartScopePrefix(object[] __args)
+        {
+            PushSourceScope(__args, 0, DamageKind.Dart);
+        }
+
+        private static void IgniteScopePrefix(object[] __args)
+        {
+            PushSourceScope(__args, 0, DamageKind.Ignite);
+        }
+
+        private static void ArrowChasingScopePrefix(object[] __args)
+        {
+            PushSourceScope(__args, 0, DamageKind.ArrowChasing);
         }
 
         private static void AssassinateScopePrefix(object[] __args)
         {
-            PushSourceScope(__args, 1);
+            PushSourceScope(__args, 1, DamageKind.Assassinate);
         }
 
         private static void MuzzleBlastScopePrefix(object[] __args)
@@ -355,27 +407,56 @@ namespace OWT.DamageMeter.Patches
                 object raw = __args != null && __args.Length > 0 ? __args[0] : null;
                 Transform transform = raw as Transform;
                 Device origin = SourceResolver.DeviceFromTransform(transform);
-                DamageOrigin.Push(origin, true);
+                DamageOrigin.Push(origin, true, DamageKind.MuzzleBlast, null);
             }
             catch
             {
-                DamageOrigin.Push(null, true);
+                DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
             }
         }
 
-        private static void PushSourceScope(object[] args, int index)
+        private static void HailScopePrefix(object[] __args)
+        {
+            try
+            {
+                Projectile projectile = __args != null && __args.Length > 0
+                    ? __args[0] as Projectile
+                    : null;
+                bool viaTag;
+                bool tagDerived;
+                Device support;
+                DamageKind kind;
+                Device origin = SourceResolver.Resolve(projectile, out viaTag,
+                    out tagDerived, out support, out kind);
+                if (origin == null && projectile != null)
+                {
+                    origin = SourceResolver.Resolve(projectile.emitter, out viaTag,
+                        out tagDerived, out support, out kind);
+                }
+                DamageOrigin.Push(origin, true, DamageKind.Hail, null);
+            }
+            catch
+            {
+                DamageOrigin.Push(null, true, DamageKind.Hail, null);
+            }
+        }
+
+        private static void PushSourceScope(object[] args, int index, DamageKind kind)
         {
             try
             {
                 ITarget source = args != null && args.Length > index ? args[index] as ITarget : null;
                 bool viaTag;
                 bool tagDerived;
-                Device origin = SourceResolver.Resolve(source, out viaTag, out tagDerived);
-                DamageOrigin.Push(origin, true);
+                Device support;
+                DamageKind tagKind;
+                Device origin = SourceResolver.Resolve(source, out viaTag,
+                    out tagDerived, out support, out tagKind);
+                DamageOrigin.Push(origin, true, kind, null);
             }
             catch
             {
-                DamageOrigin.Push(null, true);
+                DamageOrigin.Push(null, true, DamageKind.OtherDerived, null);
             }
         }
     }

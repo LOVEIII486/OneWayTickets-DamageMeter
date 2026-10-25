@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using OWT.DamageMeter.Tracking;
 using TMPro;
 using UnityEngine;
@@ -8,9 +9,11 @@ using World.Devices;
 
 namespace OWT.DamageMeter.UI
 {
-    public sealed class RowHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    public sealed class RowHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler,
+        IPointerClickHandler
     {
         public Action<bool> HoverChanged;
+        public Action Clicked;
 
         public void OnPointerEnter(PointerEventData eventData)
         {
@@ -25,6 +28,19 @@ namespace OWT.DamageMeter.UI
             if (HoverChanged != null)
             {
                 HoverChanged(false);
+            }
+        }
+
+        public void OnPointerClick(PointerEventData eventData)
+        {
+            if (eventData != null
+                && (eventData.button != PointerEventData.InputButton.Left || eventData.dragging))
+            {
+                return;
+            }
+            if (Clicked != null)
+            {
+                Clicked();
             }
         }
     }
@@ -42,10 +58,24 @@ namespace OWT.DamageMeter.UI
         private const float DerivedWidth = 90f;
         private const float BarX = 56f;
         private const float BarY = 55f;
+        private const float DetailLineHeight = 16f;
+        private const float DetailPad = 8f;
+        private const int MaxDetailLines = 10;
 
         public readonly bool IsOther;
         public Device Device;
         public RectTransform Root;
+        public Action<MeterRow> Clicked;
+
+        public float Height
+        {
+            get { return _rowHeight; }
+        }
+
+        public bool Expanded
+        {
+            get { return _expanded; }
+        }
 
         private Image _bg;
         private Image _accent;
@@ -60,6 +90,16 @@ namespace OWT.DamageMeter.UI
         private RectTransform _barRoot;
         private Image _barBg;
         private Image _barFill;
+        private TextMeshProUGUI _expandGlyph;
+
+        private RectTransform _detailRoot;
+        private Image _detailDivider;
+        private readonly List<TextMeshProUGUI> _detailLabels = new List<TextMeshProUGUI>();
+        private readonly List<TextMeshProUGUI> _detailValues = new List<TextMeshProUGUI>();
+        private int _detailCount;
+        private bool _expanded;
+        private float _rowHeight = Theme.RowHeight;
+        private float _contentAlpha = 1f;
 
         private Color _accentColor = Theme.Accent;
         private Color _nameColor = Theme.Text;
@@ -99,6 +139,7 @@ namespace OWT.DamageMeter.UI
             UiKit.Place(_bg.rectTransform, 0f, 0f, contentWidth, Theme.RowHeight);
             RowHover hover = _bg.gameObject.AddComponent<RowHover>();
             hover.HoverChanged = SetHover;
+            hover.Clicked = OnRowClicked;
 
             _accent = UiKit.RoundedImage(Root, "Accent", other ? Theme.OtherColor : Theme.Accent, 2f, false);
             UiKit.Place(_accent.rectTransform, 0f, 12f, 3f, Theme.RowHeight - 24f);
@@ -121,7 +162,7 @@ namespace OWT.DamageMeter.UI
             _name.fontStyle = FontStyles.Bold;
             _name.overflowMode = TextOverflowModes.Ellipsis;
             UiKit.Place(_name.rectTransform, NameX, 6f,
-                Mathf.Max(60f, contentWidth - 176f), 22f);
+                Mathf.Max(60f, contentWidth - 196f), 22f);
 
             _total = UiKit.Text(Root, "Total", "0", 15f, Theme.Text, TextAlignmentOptions.MidlineRight);
             _total.fontStyle = FontStyles.Bold;
@@ -138,6 +179,35 @@ namespace OWT.DamageMeter.UI
             _derived = UiKit.Text(Root, "Derived", string.Empty, 9f, Theme.DerivedColor,
                 TextAlignmentOptions.MidlineRight);
             UiKit.PlaceRight(_derived.rectTransform, RightMargin, ChipY, DerivedWidth, ChipHeight);
+
+            _expandGlyph = UiKit.Text(Root, "Expand", "▸", 9f, Theme.Faint,
+                TextAlignmentOptions.MidlineRight);
+            UiKit.PlaceRight(_expandGlyph.rectTransform, RightMargin + TotalWidth + 4f, 5f, 14f, 22f);
+
+            _detailRoot = UiKit.Rect(Root, "Details");
+            UiKit.Place(_detailRoot, 0f, Theme.RowHeight, contentWidth, 0f);
+            _detailDivider = UiKit.Image(_detailRoot, "DetailDivider", null,
+                Theme.WithAlpha(Theme.Text, 0.055f), false);
+            UiKit.Place(_detailDivider.rectTransform, 56f, 0f, contentWidth - 66f, 1f);
+            for (int i = 0; i < MaxDetailLines; i++)
+            {
+                TextMeshProUGUI label = UiKit.Text(_detailRoot, "DetailLabel" + i, string.Empty,
+                    9f, Theme.Muted, TextAlignmentOptions.MidlineLeft);
+                label.overflowMode = TextOverflowModes.Ellipsis;
+                UiKit.Place(label.rectTransform, 56f, DetailPad + i * DetailLineHeight,
+                    Mathf.Max(40f, contentWidth - 198f), 14f);
+                _detailLabels.Add(label);
+
+                TextMeshProUGUI value = UiKit.Text(_detailRoot, "DetailValue" + i, string.Empty,
+                    9f, Theme.Text, TextAlignmentOptions.MidlineRight);
+                value.overflowMode = TextOverflowModes.Ellipsis;
+                UiKit.PlaceRight(value.rectTransform, RightMargin,
+                    DetailPad + i * DetailLineHeight, 116f, 14f);
+                _detailValues.Add(value);
+                label.gameObject.SetActive(false);
+                value.gameObject.SetActive(false);
+            }
+            _detailRoot.gameObject.SetActive(false);
 
             _barRoot = UiKit.Rect(Root, "Bar");
             UiKit.Place(_barRoot, BarX, BarY, contentWidth - BarX - RightMargin, Theme.BarHeight);
@@ -158,16 +228,16 @@ namespace OWT.DamageMeter.UI
                 _icon.gameObject.SetActive(false);
                 _slot.text = "-";
                 _lastSlotText = "-";
+                _expandGlyph.gameObject.SetActive(false);
             }
         }
 
         public void SetWidth(float contentWidth)
         {
             _contentWidth = Mathf.Max(Theme.MinContentWidth, contentWidth);
-            Root.sizeDelta = new Vector2(_contentWidth, Theme.RowHeight);
-            _bg.rectTransform.sizeDelta = new Vector2(_contentWidth, Theme.RowHeight);
+            ApplyHeight();
             _name.rectTransform.sizeDelta = new Vector2(
-                Mathf.Max(60f, _contentWidth - NameX - TotalWidth - RightMargin - 4f), 22f);
+                Mathf.Max(60f, _contentWidth - NameX - TotalWidth - RightMargin - 24f), 22f);
             _sub.rectTransform.sizeDelta = new Vector2(
                 Mathf.Max(24f, _contentWidth - SubX - DerivedWidth - RightMargin - 6f), ChipHeight);
             _barWidth = Mathf.Max(40f, _contentWidth - BarX - RightMargin);
@@ -176,6 +246,15 @@ namespace OWT.DamageMeter.UI
             if (_barFill.rectTransform.sizeDelta.x > _barWidth)
             {
                 _barFill.rectTransform.sizeDelta = new Vector2(_barWidth, Theme.BarHeight);
+            }
+
+            float detailWidth = Mathf.Max(40f, _contentWidth - 66f);
+            _detailDivider.rectTransform.sizeDelta = new Vector2(detailWidth, 1f);
+            for (int i = 0; i < _detailLabels.Count; i++)
+            {
+                _detailLabels[i].rectTransform.sizeDelta = new Vector2(
+                    Mathf.Max(40f, _contentWidth - 198f), 14f);
+                _detailValues[i].rectTransform.sizeDelta = new Vector2(116f, 14f);
             }
         }
 
@@ -249,7 +328,8 @@ namespace OWT.DamageMeter.UI
             }
         }
 
-        public void UpdateWeapon(WeaponStat stat, double maxTotal, double weaponTotal, bool compact, float dt)
+        public void UpdateWeapon(WeaponStat stat, DamageTracker tracker, double maxTotal,
+            double weaponTotal, bool compact, float dt)
         {
             Color color = stat.Destroyed ? Theme.Danger : Theme.QualityColor(stat.Rank);
             if (!stat.Mounted && !stat.Destroyed)
@@ -258,11 +338,18 @@ namespace OWT.DamageMeter.UI
             }
             SetAccent(color);
 
-            double share = weaponTotal > 0.0 ? stat.TotalDamage / weaponTotal : 0.0;
-            double fill = maxTotal > 0.0 ? stat.TotalDamage / maxTotal : 0.0;
-            UpdateVisuals(stat.TotalDamage, stat.Dps, share, fill, stat.DerivedDamage, compact, dt);
+            bool support = stat.IsSupport;
+            double shown = support ? stat.AssistDamage : stat.TotalDamage;
+            double dps = support ? stat.AssistDps : stat.Dps;
+            double share = weaponTotal > 0.0 ? shown / weaponTotal : 0.0;
+            double fill = maxTotal > 0.0 ? shown / maxTotal : 0.0;
+            string chip = support ? Strings.Support : null;
+            Color chipColor = support ? Theme.Muted : Theme.DerivedColor;
+            UpdateVisuals(shown, dps, share, fill, support ? 0.0 : stat.DerivedDamage,
+                compact, dt, chip, chipColor);
+            SetDetails(stat, tracker, compact);
 
-            float dim = stat.HasDamage ? 1f : 0.55f;
+            float dim = stat.HasContribution ? 1f : 0.55f;
             SetContentAlpha(dim);
         }
 
@@ -275,7 +362,8 @@ namespace OWT.DamageMeter.UI
         }
 
         private void UpdateVisuals(double total, double dps, double share, double fill,
-            double derived, bool compact, float dt)
+            double derived, bool compact, float dt, string chipOverride = null,
+            Color? chipColor = null)
         {
             float smooth = dt > 0f ? 1f - Mathf.Exp(-12f * dt) : 1f;
             _displayTotal = Lerp(_displayTotal, total, smooth);
@@ -288,10 +376,18 @@ namespace OWT.DamageMeter.UI
             string sub = Strings.Number1(_displayDps, compact) + "/s  ·  " + Strings.Percent(_displayShare);
             SetText(_sub, ref _lastSubText, sub);
 
-            string derivedText = derived > 0.5
-                ? Strings.DerivedShort + " " + Strings.Number(_displayDerived, compact)
-                : string.Empty;
+            string derivedText = chipOverride;
+            if (derivedText == null)
+            {
+                derivedText = derived > 0.5
+                    ? Strings.DerivedShort + " " + Strings.Number(_displayDerived, compact)
+                    : string.Empty;
+            }
             SetText(_derived, ref _lastDerivedText, derivedText);
+            Color chipBase = chipColor.HasValue ? chipColor.Value : Theme.DerivedColor;
+            Color chip = chipBase;
+            chip.a = _contentAlpha;
+            _derived.color = chip;
 
             float width = _barWidth * _displayFill;
             bool show = width > 0.5f;
@@ -306,6 +402,153 @@ namespace OWT.DamageMeter.UI
             }
 
             UpdateHoverVisual(dt);
+        }
+
+        public void SetExpanded(bool expanded)
+        {
+            if (_expanded == expanded)
+            {
+                return;
+            }
+
+            _expanded = expanded;
+            _detailRoot.gameObject.SetActive(expanded);
+            if (_expandGlyph != null)
+            {
+                _expandGlyph.text = expanded ? "▾" : "▸";
+            }
+            if (!expanded)
+            {
+                _detailCount = 0;
+                ApplyHeight();
+            }
+        }
+
+        private void SetDetails(WeaponStat stat, DamageTracker tracker, bool compact)
+        {
+            if (!_expanded)
+            {
+                return;
+            }
+
+            int count = 0;
+            if (stat.IsSupport)
+            {
+                string description = tracker.GetDeviceDescription(stat.Device);
+                if (!string.IsNullOrEmpty(description))
+                {
+                    AddDetail(ref count, Strings.EffectPrefix + description, 0.0, false, false, compact);
+                }
+                AddDetail(ref count, Strings.AssistDamage, stat.AssistDamage, false, true, compact);
+                AddDetail(ref count, Strings.SupportNote, 0.0, false, false, compact);
+                for (int i = 0; i < stat.Effects.Count; i++)
+                {
+                    EffectStat effect = stat.Effects[i];
+                    AddDetail(ref count, Strings.EffectName(effect.Kind), effect.Damage, true, true, compact);
+                }
+                if (stat.Assisted.Count > 0)
+                {
+                    AddDetail(ref count, Strings.AffectedDevices, 0.0, false, false, compact);
+                    for (int i = 0; i < stat.Assisted.Count; i++)
+                    {
+                        AssistStat assist = stat.Assisted[i];
+                        AddDetail(ref count, tracker.GetDeviceName(assist.Weapon),
+                            assist.Damage, true, true, compact);
+                    }
+                }
+            }
+            else
+            {
+                AddDetail(ref count, Strings.DirectDamage, stat.DirectDamage, false, true, compact);
+                AddDetail(ref count, Strings.DerivedDamage, stat.DerivedDamage, false, true, compact);
+                if (stat.Effects.Count == 0)
+                {
+                    if (stat.DerivedDamage > 0.5)
+                    {
+                        AddDetail(ref count, Strings.EffectName(DamageKind.OtherDerived),
+                            stat.DerivedDamage, true, true, compact);
+                    }
+                    else
+                    {
+                        AddDetail(ref count, Strings.NoDerived, 0.0, true, false, compact);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < stat.Effects.Count; i++)
+                    {
+                        EffectStat effect = stat.Effects[i];
+                        string label = Strings.EffectName(effect.Kind);
+                        if (effect.Support != null)
+                        {
+                            label = tracker.GetDeviceName(effect.Support) + " · " + label;
+                        }
+                        AddDetail(ref count, label, effect.Damage, true, true, compact);
+                    }
+                }
+            }
+
+            for (int i = count; i < _detailLabels.Count; i++)
+            {
+                if (_detailLabels[i].gameObject.activeSelf)
+                {
+                    _detailLabels[i].gameObject.SetActive(false);
+                    _detailValues[i].gameObject.SetActive(false);
+                }
+            }
+
+            _detailCount = count;
+            ApplyHeight();
+        }
+
+        private void AddDetail(ref int count, string label, double value, bool indent,
+            bool showValue, bool compact)
+        {
+            if (count >= _detailLabels.Count)
+            {
+                return;
+            }
+
+            TextMeshProUGUI labelText = _detailLabels[count];
+            TextMeshProUGUI valueText = _detailValues[count];
+            labelText.text = (indent ? "· " : string.Empty) + label;
+            labelText.rectTransform.anchoredPosition = new Vector2(
+                indent ? 66f : 56f, -(DetailPad + count * DetailLineHeight));
+            labelText.color = Theme.WithAlpha(Theme.Muted, _contentAlpha * 0.95f);
+            valueText.text = showValue ? Strings.Number(value, compact) : string.Empty;
+            valueText.color = Theme.WithAlpha(Theme.Text, _contentAlpha);
+            if (!labelText.gameObject.activeSelf)
+            {
+                labelText.gameObject.SetActive(true);
+                valueText.gameObject.SetActive(true);
+            }
+            count++;
+        }
+
+        private void ApplyHeight()
+        {
+            _rowHeight = _expanded
+                ? Theme.RowHeight + DetailPad + Mathf.Max(1, _detailCount) * DetailLineHeight + DetailPad
+                : Theme.RowHeight;
+            Root.sizeDelta = new Vector2(_contentWidth, _rowHeight);
+            if (_bg != null)
+            {
+                _bg.rectTransform.sizeDelta = new Vector2(_contentWidth, _rowHeight);
+            }
+            if (_detailRoot != null)
+            {
+                _detailRoot.sizeDelta = new Vector2(_contentWidth,
+                    Mathf.Max(0f, _rowHeight - Theme.RowHeight));
+            }
+        }
+
+        private void OnRowClicked()
+        {
+            if (IsOther || Clicked == null)
+            {
+                return;
+            }
+            Clicked(this);
         }
 
         private void SetText(TextMeshProUGUI label, ref string cache, string value)
@@ -360,6 +603,7 @@ namespace OWT.DamageMeter.UI
 
         private void SetContentAlpha(float alpha)
         {
+            _contentAlpha = alpha;
             Color name = _nameColor;
             name.a = alpha;
             _name.color = name;
@@ -370,6 +614,27 @@ namespace OWT.DamageMeter.UI
             muted.a = alpha * 0.95f;
             _slot.color = muted;
             _sub.color = muted;
+
+            Color chip = _derived.color;
+            chip.a = alpha;
+            _derived.color = chip;
+
+            if (_expandGlyph != null)
+            {
+                _expandGlyph.color = Theme.WithAlpha(Theme.Faint, alpha);
+            }
+            if (_detailDivider != null)
+            {
+                _detailDivider.color = Theme.WithAlpha(Theme.Text, alpha * 0.055f);
+            }
+            for (int i = 0; i < _detailLabels.Count; i++)
+            {
+                if (_detailLabels[i].gameObject.activeSelf)
+                {
+                    _detailLabels[i].color = Theme.WithAlpha(Theme.Muted, alpha * 0.95f);
+                    _detailValues[i].color = Theme.WithAlpha(Theme.Text, alpha);
+                }
+            }
         }
 
         private static double Lerp(double from, double to, float t)

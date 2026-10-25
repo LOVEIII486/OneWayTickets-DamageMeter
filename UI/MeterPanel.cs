@@ -214,6 +214,7 @@ namespace OWT.DamageMeter.UI
 
         private readonly Dictionary<Device, MeterRow> _rowsByDevice = new Dictionary<Device, MeterRow>();
         private readonly HashSet<Device> _alive = new HashSet<Device>();
+        private readonly HashSet<Device> _expanded = new HashSet<Device>();
         private MeterRow _otherRow;
 
         private bool _built;
@@ -559,7 +560,15 @@ namespace OWT.DamageMeter.UI
             double weaponTotal = DamageTracker.SumDamage(stats);
             bool otherVisible = tracker.ShowOther;
 
-            double maxTotal = stats.Count > 0 ? stats[0].TotalDamage : 0.0;
+            double maxTotal = 0.0;
+            for (int i = 0; i < stats.Count; i++)
+            {
+                double value = stats[i].IsSupport ? stats[i].AssistDamage : stats[i].TotalDamage;
+                if (value > maxTotal)
+                {
+                    maxTotal = value;
+                }
+            }
             if (otherVisible && tracker.OtherDamage > maxTotal)
             {
                 maxTotal = tracker.OtherDamage;
@@ -567,6 +576,7 @@ namespace OWT.DamageMeter.UI
 
             bool compact = DamageMeterPlugin.UseCompactNumbers == null || DamageMeterPlugin.UseCompactNumbers.Value;
             SyncRows(stats);
+            float y = 0f;
             for (int i = 0; i < stats.Count; i++)
             {
                 MeterRow row;
@@ -574,11 +584,13 @@ namespace OWT.DamageMeter.UI
                 {
                     continue;
                 }
-                row.SetTargetY(i * (Theme.RowHeight + Theme.RowGap));
+                row.SetExpanded(_expanded.Contains(stats[i].Device));
                 row.SetWidth(_contentWidth);
                 row.SetWeapon(stats[i]);
-                row.UpdateWeapon(stats[i], maxTotal, weaponTotal, compact, deltaTime);
+                row.UpdateWeapon(stats[i], tracker, maxTotal, weaponTotal, compact, deltaTime);
+                row.SetTargetY(y);
                 row.UpdatePosition(deltaTime);
+                y += row.Height + Theme.RowGap;
             }
 
             double allDamage = weaponTotal + tracker.OtherDamage;
@@ -590,10 +602,11 @@ namespace OWT.DamageMeter.UI
                     _otherRow = new MeterRow(_rowsRoot, true, _contentWidth);
                 }
                 double otherShare = allDamage > 0.0 ? tracker.OtherDamage / allDamage : 0.0;
-                _otherRow.SetTargetY(rowCount * (Theme.RowHeight + Theme.RowGap));
                 _otherRow.SetWidth(_contentWidth);
                 _otherRow.UpdateOther(tracker.OtherDamage, tracker.OtherDps, otherShare, maxTotal, compact, deltaTime);
+                _otherRow.SetTargetY(y);
                 _otherRow.UpdatePosition(deltaTime);
+                y += _otherRow.Height + Theme.RowGap;
                 rowCount++;
             }
             else if (_otherRow != null)
@@ -628,9 +641,7 @@ namespace OWT.DamageMeter.UI
                 _subtitle.text = subtitle;
             }
 
-            float contentHeight = rowCount > 0
-                ? rowCount * Theme.RowHeight + (rowCount - 1) * Theme.RowGap
-                : 34f;
+            float contentHeight = y > 0f ? Mathf.Max(0f, y - Theme.RowGap) : 34f;
             _targetHeight = Theme.RowsTop + contentHeight + 12f + Theme.FooterHeight + 4f;
 
             ApplyLayout(deltaTime, false);
@@ -651,6 +662,7 @@ namespace OWT.DamageMeter.UI
                 if (!_rowsByDevice.ContainsKey(device))
                 {
                     MeterRow row = new MeterRow(_rowsRoot, false, _contentWidth);
+                    row.Clicked = OnRowClicked;
                     _rowsByDevice.Add(device, row);
                 }
             }
@@ -675,7 +687,21 @@ namespace OWT.DamageMeter.UI
                     MeterRow row = _rowsByDevice[removing[i]];
                     row.Destroy();
                     _rowsByDevice.Remove(removing[i]);
+                    _expanded.Remove(removing[i]);
                 }
+            }
+        }
+
+        private void OnRowClicked(MeterRow row)
+        {
+            if (row == null || row.Device == null)
+            {
+                return;
+            }
+
+            if (!_expanded.Add(row.Device))
+            {
+                _expanded.Remove(row.Device);
             }
         }
 

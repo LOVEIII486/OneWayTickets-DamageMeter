@@ -6,9 +6,23 @@ using OWT.DamageMeter.UI;
 using UnityEngine;
 using World;
 using World.Devices;
+using World.Devices.Device_AI;
 
 namespace OWT.DamageMeter.Tracking
 {
+    public sealed class EffectStat
+    {
+        public DamageKind Kind;
+        public Device Support;
+        public double Damage;
+    }
+
+    public sealed class AssistStat
+    {
+        public Device Weapon;
+        public double Damage;
+    }
+
     public sealed class WeaponStat
     {
         public Device Device;
@@ -26,15 +40,32 @@ namespace OWT.DamageMeter.Tracking
         public double TotalDamage;
         public double DirectDamage;
         public double DerivedDamage;
+        public double AssistDamage;
         public double MountedSeconds;
         public int Hits;
         public int CritHits;
 
         public readonly Dictionary<string, double> DamageTypes = new Dictionary<string, double>(4);
+        public readonly List<EffectStat> Effects = new List<EffectStat>(4);
+        public readonly List<AssistStat> Assisted = new List<AssistStat>(2);
 
         public bool HasDamage
         {
             get { return TotalDamage > 0.0; }
+        }
+
+        public bool HasContribution
+        {
+            get { return TotalDamage > 0.0 || AssistDamage > 0.0; }
+        }
+
+        public bool IsSupport
+        {
+            get
+            {
+                return Device is DScript_Special_Quiver
+                    || (AssistDamage > 0.0 && TotalDamage <= 0.0);
+            }
         }
 
         public bool IsWheelSlot
@@ -52,12 +83,19 @@ namespace OWT.DamageMeter.Tracking
             get { return TotalDamage / Math.Max(1.0, MountedSeconds); }
         }
 
-        public void Add(int damage, bool derived, string damageType)
+        public double AssistDps
+        {
+            get { return AssistDamage / Math.Max(1.0, MountedSeconds); }
+        }
+
+        public void Add(int damage, bool derived, string damageType,
+            DamageKind kind, Device support)
         {
             TotalDamage += damage;
             if (derived)
             {
                 DerivedDamage += damage;
+                AddEffect(kind, support, damage);
             }
             else
             {
@@ -71,16 +109,49 @@ namespace OWT.DamageMeter.Tracking
             DamageTypes[type] = old + damage;
         }
 
+        public void AddAssist(Device weapon, int damage, DamageKind kind)
+        {
+            AssistDamage += damage;
+            AddEffect(kind, null, damage);
+
+            for (int i = 0; i < Assisted.Count; i++)
+            {
+                if (ReferenceEquals(Assisted[i].Weapon, weapon))
+                {
+                    Assisted[i].Damage += damage;
+                    return;
+                }
+            }
+            Assisted.Add(new AssistStat { Weapon = weapon, Damage = damage });
+        }
+
+        private void AddEffect(DamageKind kind, Device support, int damage)
+        {
+            for (int i = 0; i < Effects.Count; i++)
+            {
+                EffectStat effect = Effects[i];
+                if (effect.Kind == kind && ReferenceEquals(effect.Support, support))
+                {
+                    effect.Damage += damage;
+                    return;
+                }
+            }
+            Effects.Add(new EffectStat { Kind = kind, Support = support, Damage = damage });
+        }
+
         public void ResetStats()
         {
             TotalDamage = 0.0;
             DirectDamage = 0.0;
             DerivedDamage = 0.0;
+            AssistDamage = 0.0;
             MountedSeconds = 0.0;
             Hits = 0;
             CritHits = 0;
             LoggedFirstHit = false;
             DamageTypes.Clear();
+            Effects.Clear();
+            Assisted.Clear();
         }
     }
 
@@ -307,15 +378,13 @@ namespace OWT.DamageMeter.Tracking
                     return;
                 }
 
-                bool derived;
-                bool enemySource;
-                Device device = SourceResolver.ResolveForHit(harmSource, out derived, out enemySource);
-                if (enemySource)
+                SourceResolver.HitSource hit = SourceResolver.ResolveForHit(harmSource);
+                if (hit.EnemySource)
                 {
                     return;
                 }
 
-                if (device == null)
+                if (hit.Device == null)
                 {
                     AddOther(damage.dmg);
                     if (DamageMeterPlugin.VerboseLogging != null && DamageMeterPlugin.VerboseLogging.Value)
@@ -325,15 +394,32 @@ namespace OWT.DamageMeter.Tracking
                     return;
                 }
 
-                WeaponStat stat = GetOrCreate(device);
-                if (derived && DamageMeterPlugin.CountDerivativeDamage != null
+                WeaponStat stat = GetOrCreate(hit.Device);
+                if (hit.Derived && DamageMeterPlugin.CountDerivativeDamage != null
                     && !DamageMeterPlugin.CountDerivativeDamage.Value)
                 {
                     AddOther(damage.dmg);
                     return;
                 }
 
-                stat.Add(damage.dmg, derived, damage.diy_dmg_str);
+                stat.Add(damage.dmg, hit.Derived, damage.diy_dmg_str, hit.Kind, hit.Support);
+                if (hit.Derived && hit.Support != null && !ReferenceEquals(hit.Support, hit.Device))
+                {
+                    WeaponStat supportStat = GetOrCreate(hit.Support);
+                    bool firstAssist = supportStat.AssistDamage <= 0.0;
+                    supportStat.AddAssist(hit.Device, damage.dmg, hit.Kind);
+                    if (firstAssist
+                        && DamageMeterPlugin.VerboseLogging != null
+                        && DamageMeterPlugin.VerboseLogging.Value)
+                    {
+                        DamageMeterPlugin.Log.LogInfo(string.Format(
+                            "Support {0} assisted {1} with {2} ({3} damage).",
+                            GetDeviceName(hit.Support),
+                            GetDeviceName(hit.Device),
+                            hit.Kind,
+                            damage.dmg));
+                    }
+                }
                 if (damage.is_critical)
                 {
                     stat.CritHits++;
@@ -345,10 +431,11 @@ namespace OWT.DamageMeter.Tracking
                 {
                     stat.LoggedFirstHit = true;
                     DamageMeterPlugin.Log.LogInfo(string.Format(
-                        "First hit for {0}: {1} damage ({2}), type={3}, source={4}",
-                        stat.Name ?? device.GetType().Name,
+                        "First hit for {0}: {1} damage ({2}), kind={3}, type={4}, source={5}",
+                        stat.Name ?? hit.Device.GetType().Name,
                         damage.dmg,
-                        derived ? "derived" : "direct",
+                        hit.Derived ? "derived" : "direct",
+                        hit.Kind,
                         string.IsNullOrEmpty(damage.diy_dmg_str) ? "normal" : damage.diy_dmg_str,
                         harmSource == null ? "null" : harmSource.GetType().Name));
                 }
@@ -361,6 +448,87 @@ namespace OWT.DamageMeter.Tracking
                     DamageMeterPlugin.Log.LogError("Damage tracking failed:\n" + ex);
                 }
             }
+        }
+
+        public string GetDeviceDescription(Device device)
+        {
+            if (device == null || device.desc == null)
+            {
+                return null;
+            }
+
+            string raw = device.desc.alt_info;
+            if (string.IsNullOrEmpty(raw))
+            {
+                return null;
+            }
+
+            string localized = LocalizeName(raw);
+            if (string.IsNullOrEmpty(localized) || IsKeyLike(localized))
+            {
+                return null;
+            }
+
+            return StripTags(localized);
+        }
+
+        private static string StripTags(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            string source = text.Replace("<br>", " ").Replace("<br/>", " ").Replace("<br />", " ");
+            System.Text.StringBuilder builder = new System.Text.StringBuilder(source.Length);
+            bool inTag = false;
+            for (int i = 0; i < source.Length; i++)
+            {
+                char c = source[i];
+                if (c == '<')
+                {
+                    inTag = true;
+                }
+                else if (c == '>')
+                {
+                    inTag = false;
+                }
+                else if (!inTag)
+                {
+                    builder.Append(c);
+                }
+            }
+            return builder.ToString().Trim();
+        }
+
+        public string GetDeviceName(Device device)
+        {
+            if (device == null)
+            {
+                return Strings.UnknownDevice;
+            }
+
+            WeaponStat stat;
+            if (_stats.TryGetValue(device, out stat) && stat.MetaResolved)
+            {
+                return string.IsNullOrEmpty(stat.Name) ? Strings.UnknownDevice : stat.Name;
+            }
+
+            if (device.desc != null)
+            {
+                string raw = device.desc.name;
+                string localized = LocalizeName(raw);
+                if (!string.IsNullOrEmpty(localized) && !IsKeyLike(localized))
+                {
+                    return localized;
+                }
+                if (!string.IsNullOrEmpty(raw) && !IsKeyLike(raw))
+                {
+                    return raw;
+                }
+            }
+
+            return device.GetType().Name;
         }
 
         private void AddOther(int damage)
@@ -396,7 +564,7 @@ namespace OWT.DamageMeter.Tracking
 
             foreach (WeaponStat stat in _stats.Values)
             {
-                if (stat.HasDamage)
+                if (stat.HasContribution)
                 {
                     if (stat.Mounted || showRemoved)
                     {
@@ -415,6 +583,21 @@ namespace OWT.DamageMeter.Tracking
 
         private static int CompareStats(WeaponStat a, WeaponStat b)
         {
+            int bySupport = a.IsSupport.CompareTo(b.IsSupport);
+            if (bySupport != 0)
+            {
+                return bySupport;
+            }
+
+            if (a.IsSupport && b.IsSupport)
+            {
+                int byAssist = b.AssistDamage.CompareTo(a.AssistDamage);
+                if (byAssist != 0)
+                {
+                    return byAssist;
+                }
+            }
+
             int byDamage = b.TotalDamage.CompareTo(a.TotalDamage);
             if (byDamage != 0)
             {

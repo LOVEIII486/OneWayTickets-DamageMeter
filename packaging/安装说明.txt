@@ -1,5 +1,5 @@
 再再启程 One Way Tickets 伤害统计模组整合包
-OWT Damage Meter 0.5.2 + BepInEx 5.4.23.5
+OWT Damage Meter 0.6.0 + BepInEx 5.4.23.5
 
 适用版本
 Windows 64 位，Steam 版《再再启程 One Way Tickets》。
@@ -56,7 +56,7 @@ BepInEx/config/owt.damagemeter.cfg
 
 日志验证
 打开游戏目录下的 BepInEx\LogOutput.log，能看到下面几行就说明插件加载成功：
-[Info   :OWT Damage Meter] OWT Damage Meter v0.5.2 loaded.
+[Info   :OWT Damage Meter] OWT Damage Meter v0.6.0 loaded.
 [Info   :OWT Damage Meter] Damage meter host created.
 [Info   :OWT Damage Meter] Damage meter HUD built.
 

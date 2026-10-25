@@ -17,7 +17,7 @@ namespace OWT.DamageMeter
     {
         public const string Guid = "owt.damagemeter";
         public const string Name = "OWT Damage Meter";
-        public const string Version = "0.5.2";
+        public const string Version = "0.6.0";
 
         internal const float DefaultPanelX = -24f;
         internal const float DefaultPanelY = -24f;
